@@ -109,7 +109,7 @@ export const POST: APIRoute = async ({ request }) => {
 
     // Process each result to include its compliance signals
     for (const result of results) {
-      let resultStatus: "YES" | "NO" | "YES IF" = "NO";
+      let resultStatus: "High Risk" | "Low Risk" | "Moderate Risk" = "Low Risk";
       let resultOverall: "NO" | "AMBER" | "GREEN" = "GREEN";
       const resultDetectedTags: string[] = [];
       const resultDetectedCountries: string[] = [];
@@ -145,16 +145,16 @@ export const POST: APIRoute = async ({ request }) => {
         }
       }
 
-      // Determine final status and overall for this specific result
+      // Determine final status and overall based on processing results
       if (resultHasCriticalTag) {
-        resultStatus = "YES";
+        resultStatus = "High Risk";
         resultOverall = "NO"; // Red
       } else if (resultHasAnyTag) {
-        // If results exist but no critical tags, it's conditional
-        resultStatus = "YES IF";
+        // If results exist but no critical tags, it\'s conditional
+        resultStatus = "Moderate Risk";
         resultOverall = "AMBER"; // Amber
       }
-      // If hasAnyTag is false, status and overall remain "NO" and "GREEN" by default
+      // If hasAnyTag is false, status and overall remain "Low Risk" and "GREEN" by default
 
       // Attach compliance signals to the result object
       result.compliance = {

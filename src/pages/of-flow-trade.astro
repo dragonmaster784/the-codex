@@ -23,6 +23,26 @@
                 />
             </div>
             <div>
+                <label for="productName" class="block text-sm font-medium text-gray-700">Product Name</label>
+                <input
+                    type="text"
+                    id="productName"
+                    name="productName"
+                    class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    placeholder="e.g., Semiconductor, Laser"
+                />
+            </div>
+            <div>
+                <label for="hsCode" class="block text-sm font-medium text-gray-700">HS Code (Optional)</label>
+                <input
+                    type="text"
+                    id="hsCode"
+                    name="hsCode"
+                    class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    placeholder="e.g., 8486.90"
+                />
+            </div>
+            <div>
                 <label for="schemaSelector" class="block text-sm font-medium text-gray-700">Search Type</label>
                 <select
                     id="schemaSelector"
@@ -77,12 +97,45 @@
                 </button>
             </div>
         </div>
+
+        <div id="productLoading" class="hidden mt-6 text-center text-indigo-600">
+            <svg class="animate-spin h-5 w-5 text-indigo-600 inline-block mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Checking product...
+        </div>
+
+        <div id="productError" class="hidden mt-6 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+            <strong class="font-bold">Error!</strong>
+            <span class="block sm:inline" id="productErrorMessage"></span>
+        </div>
+
+        <div id="productResultsCard" class="hidden mt-6 p-6 rounded-lg shadow-md border border-gray-200">
+            <h2 class="text-xl font-semibold mb-4 text-gray-800">Product Classification Results</h2>
+            <p class="mb-2"><strong>Status:</strong> <span id="productResultStatus" class="font-medium"></span></p>
+            <p class="mb-2"><strong>Overall:</strong> <span id="productResultOverall" class="font-medium px-2 py-1 rounded-md text-white"></span></p>
+            <p class="mb-2"><strong>Product:</strong> <span id="productResultName" class="text-gray-600"></span></p>
+            <p class="mb-2"><strong>HS Code:</strong> <span id="productResultHsCode" class="text-gray-600"></span></p>
+            <p class="mb-2"><strong>Description:</strong> <span id="productResultSnippet" class="text-gray-600 text-sm italic"></span></p>
+            <p class="mb-2"><strong>Legal Citation:</strong> <span id="productResultLegalCitation" class="text-gray-600 text-sm"></span></p>
+            <p class="mb-2"><strong>Timestamp:</strong> <span id="productResultTimestamp" class="text-gray-600 text-sm"></span></p>
+            <p class="mt-4">
+                <a id="productResultSourceUrl" href="#" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:text-indigo-800 text-sm font-medium">
+                    View EU Dual-Use Regulation
+                </a>
+            </p>
+        </div>
     </div>
 
     <script define:vars={{ url: Astro.url.origin }}>
         const form = document.getElementById('complianceForm');
         const buyerNameInput = document.getElementById('buyerName');
+        const productNameInput = document.getElementById('productName');
+        const hsCodeInput = document.getElementById('hsCode');
         const schemaSelector = document.getElementById('schemaSelector');
+
+        // Buyer sanctions check elements
         const loadingDiv = document.getElementById('loading');
         const errorDiv = document.getElementById('error');
         const errorMessageSpan = document.getElementById('errorMessage');
@@ -99,6 +152,20 @@
         const nextResultBtn = document.getElementById('nextResultBtn');
         const resultCount = document.getElementById('resultCount');
 
+        // Product classification check elements
+        const productLoading = document.getElementById('productLoading');
+        const productError = document.getElementById('productError');
+        const productErrorMessageSpan = document.getElementById('productErrorMessage');
+        const productResultsCard = document.getElementById('productResultsCard');
+        const productResultStatus = document.getElementById('productResultStatus');
+        const productResultOverall = document.getElementById('productResultOverall');
+        const productResultName = document.getElementById('productResultName');
+        const productResultHsCode = document.getElementById('productResultHsCode');
+        const productResultSnippet = document.getElementById('productResultSnippet');
+        const productResultLegalCitation = document.getElementById('productResultLegalCitation');
+        const productResultTimestamp = document.getElementById('productResultTimestamp');
+        const productResultSourceUrl = document.getElementById('productResultSourceUrl');
+
         let rawResults = []; // Store all results from the API, each with its compliance signals
         let currentResultIndex = 0; // Track the currently displayed result index
 
@@ -106,53 +173,91 @@
             e.preventDefault();
             const buyerName = buyerNameInput.value.trim();
             const selectedSchema = schemaSelector.value;
+            const productName = productNameInput.value.trim();
+            const hsCode = hsCodeInput.value.trim();
 
-            if (!buyerName) {
-                displayError('Please enter a buyer name.');
+            if (!buyerName && (!productName && !hsCode)) {
+                displayError('Please enter a buyer name OR a product name/HS code.');
                 return;
             }
 
-            // Reset previous states
+            // Reset previous states for buyer sanctions
             loadingDiv.classList.remove('hidden');
             errorDiv.classList.add('hidden');
             resultsCard.classList.add('hidden');
-            resultNavigation.classList.add('hidden'); // Hide navigation during loading
+            resultNavigation.classList.add('hidden');
 
-            try {
-                const response = await fetch(`/api/search`, {
+            // Reset previous states for product classification
+            productLoading.classList.add('hidden');
+            productError.classList.add('hidden');
+            productResultsCard.classList.add('hidden');
+
+            let buyerCheckPromise = Promise.resolve();
+            if (buyerName) {
+                loadingDiv.classList.remove('hidden');
+                buyerCheckPromise = fetch(`/api/search`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({ buyerName: buyerName, schema: selectedSchema }),
-                });
-                const data = await response.json();
-
-                if (!response.ok) {
-                    displayError(data.error || 'Something went wrong.');
-                    return;
-                }
-
-                rawResults = data.raw_results || []; // Store all enriched results from the API
-                currentResultIndex = 0; // Start displaying the first result
-
-                if (rawResults.length > 0) {
-                    renderResult(currentResultIndex); // Render the first result
-                    if (rawResults.length > 1) { // Only show navigation if there's more than one result
-                        resultNavigation.classList.remove('hidden');
+                })
+                .then(response => response.json().then(data => ({ response, data })))
+                .then(({ response, data }) => {
+                    if (!response.ok) {
+                        displayError(data.error || 'Buyer check failed.');
+                        return; // Exit this promise chain, don't proceed with rendering
                     }
-                } else {
-                    displayError('No matching entities found.'); // Show error if no results
-                    resultNavigation.classList.add('hidden'); // Hide navigation
-                    return;
-                }
-
-            } catch (error) {
-                console.error('Fetch error:', error);
-                displayError('Network error or server unreachable.');
-            } finally {
-                loadingDiv.classList.add('hidden');
+                    rawResults = data.raw_results || [];
+                    currentResultIndex = 0;
+                    if (rawResults.length > 0) {
+                        renderResult(currentResultIndex);
+                        if (rawResults.length > 1) {
+                            resultNavigation.classList.remove('hidden');
+                        }
+                    } else {
+                        displayError('No matching entities found for buyer.');
+                    }
+                })
+                .catch(error => {
+                    console.error('Buyer check fetch error:', error);
+                    displayError('Network error or server unreachable for buyer check.');
+                })
+                .finally(() => {
+                    loadingDiv.classList.add('hidden');
+                });
             }
+
+
+            let productCheckPromise = Promise.resolve();
+            if (productName || hsCode) {
+                productLoading.classList.remove('hidden');
+                productCheckPromise = fetch(`/api/classify`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ product: productName, hs_code: hsCode }),
+                })
+                .then(response => response.json().then(data => ({ response, data })))
+                .then(({ response, data }) => {
+                    if (!response.ok) {
+                        displayProductError(data.error || 'Product classification failed.');
+                        return;
+                    }
+                    renderProductResult(data);
+                })
+                .catch(error => {
+                    console.error('Product check fetch error:', error);
+                    displayProductError('Network error or server unreachable for product classification.');
+                })
+                .finally(() => {
+                    productLoading.classList.add('hidden');
+                });
+            }
+
+            // Await both promises if both checks are performed, but allow partial submission
+            await Promise.allSettled([buyerCheckPromise, productCheckPromise]);
         });
 
         function renderResult(index) {
@@ -212,12 +317,51 @@
             }
         });
 
+        // Function to render product classification results
+        function renderProductResult(data) {
+            productResultStatus.textContent = data.status;
+            productResultOverall.textContent = data.overall;
+            productResultName.textContent = data.product || 'N/A';
+            productResultHsCode.textContent = data.hs_code || 'N/A';
+            productResultSnippet.textContent = data.snippet || 'No specific snippet found.';
+            productResultLegalCitation.textContent = data.legal_citation || 'N/A';
+            productResultTimestamp.textContent = new Date(data.timestamp).toLocaleString();
+            productResultSourceUrl.href = data.source_url;
+
+            productResultOverall.className = 'font-medium px-2 py-1 rounded-md text-white'; // Reset classes
+            productResultsCard.classList.remove('bg-green-100', 'bg-amber-100', 'bg-red-100'); // Reset card bg
+
+            if (data.overall === 'GREEN') {
+                productResultsCard.classList.add('bg-green-100');
+                productResultOverall.classList.add('bg-green-500');
+            } else if (data.overall === 'AMBER') {
+                productResultsCard.classList.add('bg-amber-100');
+                productResultOverall.classList.add('bg-amber-500');
+            } else { // NO
+                productResultsCard.classList.add('bg-red-100');
+                productResultOverall.classList.add('bg-red-500');
+            }
+            productResultsCard.classList.remove('hidden'); // Show card once populated
+        }
+
+        // Specific error display for product classification
+        function displayProductError(message) {
+            productErrorMessageSpan.textContent = message;
+            productError.classList.remove('hidden');
+            productLoading.classList.add('hidden');
+            productResultsCard.classList.add('hidden');
+        }
+
         function displayError(message) {
             errorMessageSpan.textContent = message;
             errorDiv.classList.remove('hidden');
             loadingDiv.classList.add('hidden');
             resultsCard.classList.add('hidden');
             resultNavigation.classList.add('hidden'); // Hide navigation on error
+            // Also hide product-related cards on general error
+            productLoading.classList.add('hidden');
+            productError.classList.add('hidden');
+            productResultsCard.classList.add('hidden');
         }
     </script>
 </body>
