@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flow Trade</title>
+    <!-- Tailwind CSS is now handled by Astro's integration, no CDN script needed here -->
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4 font-sans antialiased">
+    <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-xl border border-gray-200">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6 text-center">Flow Trade</h1>
+
+        <form id="complianceForm" class="space-y-4">
+            <div>
+                <label for="buyerName" class="block text-sm font-medium text-gray-700">Buyer Name</label>
+                <input
+                    type="text"
+                    id="buyerName"
+                    name="buyerName"
+                    class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    placeholder="e.g., CGN TRADE, STN, Barack Obama"
+                    required
+                />
+            </div>
+            <div>
+                <label for="schemaSelector" class="block text-sm font-medium text-gray-700">Search Type</label>
+                <select
+                    id="schemaSelector"
+                    name="schemaSelector"
+                    class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                >
+                    <option value="LegalEntity">Company / Legal Entity</option>
+                    <option value="Person">Person</option>
+                </select>
+            </div>
+            <button
+                type="submit"
+                class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+            >
+                Enquire
+            </button>
+        </form>
+
+        <div id="loading" class="hidden mt-6 text-center text-indigo-600">
+            <svg class="animate-spin h-5 w-5 text-indigo-600 inline-block mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Loading...
+        </div>
+
+        <div id="error" class="hidden mt-6 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+            <strong class="font-bold">Error!</strong>
+            <span class="block sm:inline" id="errorMessage"></span>
+        </div>
+
+        <div id="resultsCard" class="hidden mt-6 p-6 rounded-lg shadow-md border border-gray-200">
+            <h2 class="text-xl font-semibold mb-4 text-gray-800">Compliance Results</h2>
+            <p class="mb-2"><strong>Status:</strong> <span id="resultStatus" class="font-medium"></span></p>
+            <h3 class="text-lg font-semibold text-gray-700 mb-2"><span id="resultEntityName"></span></h3>
+            <p class="mb-2"><strong>Overall:</strong> <span id="resultOverall" class="font-medium px-2 py-1 rounded-md text-white"></span></p>
+            <p class="mb-2"><strong>Matched Tags:</strong> <span id="resultMatchedTags" class="text-gray-600"></span></p>
+            <p class="mb-2"><strong>Locales:</strong> <span id="resultLocales" class="text-gray-600"></span></p>
+            <p class="mb-2"><strong>Timestamp:</strong> <span id="resultTimestamp" class="text-gray-600 text-sm"></span></p>
+            <p class="mt-4">
+                <a id="resultSourceUrl" href="#" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:text-indigo-800 text-sm font-medium">
+                    View on OpenSanctions.org
+                </a>
+            </p>
+            <div id="resultNavigation" class="hidden mt-4 flex justify-between items-center">
+                <button id="prevResultBtn" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md shadow-sm hover:bg-gray-300 disabled:opacity-50" disabled>
+                    Previous
+                </button>
+                <span id="resultCount" class="text-gray-600 text-sm"></span>
+                <button id="nextResultBtn" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md shadow-sm hover:bg-gray-300 disabled:opacity-50" disabled>
+                    Next
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script define:vars={{ url: Astro.url.origin }}>
+        const form = document.getElementById('complianceForm');
+        const buyerNameInput = document.getElementById('buyerName');
+        const schemaSelector = document.getElementById('schemaSelector');
+        const loadingDiv = document.getElementById('loading');
+        const errorDiv = document.getElementById('error');
+        const errorMessageSpan = document.getElementById('errorMessage');
+        const resultsCard = document.getElementById('resultsCard');
+        const resultStatus = document.getElementById('resultStatus');
+        const resultOverall = document.getElementById('resultOverall');
+        const resultMatchedTags = document.getElementById('resultMatchedTags');
+        const resultLocales = document.getElementById('resultLocales');
+        const resultTimestamp = document.getElementById('resultTimestamp');
+        const resultSourceUrl = document.getElementById('resultSourceUrl');
+        const resultEntityName = document.getElementById('resultEntityName');
+        const resultNavigation = document.getElementById('resultNavigation');
+        const prevResultBtn = document.getElementById('prevResultBtn');
+        const nextResultBtn = document.getElementById('nextResultBtn');
+        const resultCount = document.getElementById('resultCount');
+
+        let rawResults = []; // Store all results from the API, each with its compliance signals
+        let currentResultIndex = 0; // Track the currently displayed result index
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const buyerName = buyerNameInput.value.trim();
+            const selectedSchema = schemaSelector.value;
+
+            if (!buyerName) {
+                displayError('Please enter a buyer name.');
+                return;
+            }
+
+            // Reset previous states
+            loadingDiv.classList.remove('hidden');
+            errorDiv.classList.add('hidden');
+            resultsCard.classList.add('hidden');
+            resultNavigation.classList.add('hidden'); // Hide navigation during loading
+
+            try {
+                const response = await fetch(`/api/search`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ buyerName: buyerName, schema: selectedSchema }),
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    displayError(data.error || 'Something went wrong.');
+                    return;
+                }
+
+                rawResults = data.raw_results || []; // Store all enriched results from the API
+                currentResultIndex = 0; // Start displaying the first result
+
+                if (rawResults.length > 0) {
+                    renderResult(currentResultIndex); // Render the first result
+                    if (rawResults.length > 1) { // Only show navigation if there's more than one result
+                        resultNavigation.classList.remove('hidden');
+                    }
+                } else {
+                    displayError('No matching entities found.'); // Show error if no results
+                    resultNavigation.classList.add('hidden'); // Hide navigation
+                    return;
+                }
+
+            } catch (error) {
+                console.error('Fetch error:', error);
+                displayError('Network error or server unreachable.');
+            } finally {
+                loadingDiv.classList.add('hidden');
+            }
+        });
+
+        function renderResult(index) {
+            if (index < 0 || index >= rawResults.length) {
+                return; // Invalid index
+            }
+
+            const result = rawResults[index];
+            const compliance = result.compliance || {}; // Get pre-calculated compliance signals
+            const entityName = result.caption || result.properties?.name?.[0] || 'Unknown Entity';
+
+            // Update DOM elements using pre-calculated compliance data
+            resultEntityName.textContent = entityName;
+            resultStatus.textContent = compliance.status;
+            resultOverall.textContent = compliance.overall;
+            resultMatchedTags.textContent = compliance.matched_tags.length > 0 ? compliance.matched_tags.join(', ') : 'None detected';
+            resultLocales.textContent = compliance.locales.length > 0 ? compliance.locales.join(', ') : 'None detected';
+            resultTimestamp.textContent = new Date(result.last_seen || Date.now()).toLocaleString(); // Use result's last_seen or current time
+
+            // The source URL from the API response is general, but we can make it specific to the entity shown
+            // Sticking to 'sanctions' scope for the public URL for consistency with initial requirement.
+            resultSourceUrl.href = `https://www.opensanctions.org/search/?q=${encodeURIComponent(entityName)}&scope=sanctions`;
+
+            // Update overall color cues
+            resultOverall.className = 'font-medium px-2 py-1 rounded-md text-white'; // Reset classes
+            resultsCard.classList.remove('bg-green-100', 'bg-amber-100', 'bg-red-100'); // Reset card bg
+            if (compliance.overall === 'GREEN') {
+                resultsCard.classList.add('bg-green-100');
+                resultOverall.classList.add('bg-green-500');
+            } else if (compliance.overall === 'AMBER') {
+                resultsCard.classList.add('bg-amber-100');
+                resultOverall.classList.add('bg-amber-500');
+            } else { // NO
+                resultsCard.classList.add('bg-red-100');
+                resultOverall.classList.add('bg-red-500');
+            }
+
+            // Update navigation buttons and count
+            prevResultBtn.disabled = index === 0;
+            nextResultBtn.disabled = index === rawResults.length - 1;
+            resultCount.textContent = `Result ${index + 1} of ${rawResults.length}`;
+            resultsCard.classList.remove('hidden'); // Show card once populated
+        }
+
+        // Add event listeners for navigation
+        prevResultBtn.addEventListener('click', () => {
+            if (currentResultIndex > 0) {
+                currentResultIndex--;
+                renderResult(currentResultIndex);
+            }
+        });
+
+        nextResultBtn.addEventListener('click', () => {
+            if (currentResultIndex < rawResults.length - 1) {
+                currentResultIndex++;
+                renderResult(currentResultIndex);
+            }
+        });
+
+        function displayError(message) {
+            errorMessageSpan.textContent = message;
+            errorDiv.classList.remove('hidden');
+            loadingDiv.classList.add('hidden');
+            resultsCard.classList.add('hidden');
+            resultNavigation.classList.add('hidden'); // Hide navigation on error
+        }
+    </script>
+</body>
+</html>
