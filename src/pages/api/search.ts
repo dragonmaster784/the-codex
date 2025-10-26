@@ -2,7 +2,7 @@ import type { APIRoute } from "astro";
 
 export const prerender = false; // Essential for server-side processing of dynamic requests
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   if (request.headers.get("Content-Type") !== "application/json") {
     return new Response(JSON.stringify({ error: "Expected JSON body." }), {
       status: 400,
@@ -30,7 +30,7 @@ export const POST: APIRoute = async ({ request }) => {
     });
   }
 
-  const OPEN_SANCTIONS_KEY = import.meta.env.OPEN_SANCTIONS_KEY;
+  const OPEN_SANCTIONS_KEY = locals.runtime.env.OPEN_SANCTIONS_KEY;
 
   if (!OPEN_SANCTIONS_KEY) {
     console.error("OPEN_SANCTIONS_KEY is not set.");
